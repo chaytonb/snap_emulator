@@ -1,0 +1,12 @@
+/output_files
+/cluster_files
+/input_files
+/processed_daily_coarsened
+/processed_weekly_coarsened
+/submit_scripts
+combined_t6_data_accumulated.npz
+combined_t6_data_column.npz
+scaled_combined_t6_data_accumulated.npz
+scaled_combined_t6_data_column.npz
+test.ipynb
+plan.txt
