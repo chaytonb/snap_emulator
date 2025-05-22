@@ -12,15 +12,15 @@ GRID.AUTODETECT.FROM_INPUT
 
 TIME.STEP= 300
 TIME.START= 1994 10 23 15
-TIME.RUN= 100h
+TIME.RUN= 13h
 
 STEP.HOUR.OUTPUT.FIELDS = 1
 STEP.HOUR.INPUT.MIN = 1
 STEP.HOUR.INPUT.MAX = 1
 
 FIELD.OUTTYPE=netcdf
-FIELD.OUTPUT= /lustre/storeB/users/chbou7748/emulator_1/output_files/ETEX_forward_era5_000.nc
-LOG.FILE= /lustre/storeB/users/chbou7748/emulator_1/output_files/ETEX_forward_era5_000.log
+FIELD.OUTPUT= /lustre/storeB/users/chbou7748/emulator_1/output_files_t6/ETEX_forward_era5_000.nc
+LOG.FILE= /lustre/storeB/users/chbou7748/emulator_1/output_files_t6/ETEX_forward_era5_000.log
 
 PRECIPITATION.OFF
 
