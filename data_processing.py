@@ -36,7 +36,7 @@ def process_t6_data(output_file_path, target_var):
                 meteo_data = meteo_data.isel(x=slice(188, 524), y=slice(97, 433)) # Dimensions: 336x336
                 
                 # Load SNAP data
-                snap_file_path = f'output_files_t6/ringhals_2023{month}{day}_{time}Z.nc'
+                snap_file_path = f'output_files/ringhals_2023{month}{day}_{time}Z.nc'
                 snap_data = xr.open_dataset(snap_file_path, engine="netcdf4")
                 snap_data = snap_data[[target_var, 'instant_height_boundary_layer']]
                 snap_data = snap_data.isel(x=slice(188, 524), y=slice(97, 433)) # Dimensions: 336x336
@@ -47,13 +47,14 @@ def process_t6_data(output_file_path, target_var):
                 log_conc = np.zeros_like(concentration_values)
                 # Apply log transformation to values that are > 0
                 log_conc[concentration_values > 0] = np.log(concentration_values[concentration_values > 0])
-                # Set values smaller than 1e-20 to zero, then shift by 20 leaving only positive values
-                log_conc = np.where(log_conc < -20, 0, log_conc) + 20
+                # Set values smaller than 1e-20 to 0
+                log_conc = np.where(log_conc < -20, 0, log_conc)
+                # Add 20 to all non-zero values
+                log_conc = np.where(log_conc != 0, log_conc+20, 0)
                 # Assign the result back to the original data structure
                 snap_data[target_var] = (('time', 'y', 'x'), log_conc)
                 
                 preds_data = np.stack([
-                    snap_data[target_var].isel(time=spinup_hours).values,
                     meteo_data['x_wind_10m'].isel(time=spinup_hours+1, height7=0).values,
                     meteo_data['x_wind_10m'].isel(time=13, height7=0).values, # T+6
                     meteo_data['y_wind_10m'].isel(time=spinup_hours+1, height7=0).values,
@@ -94,6 +95,3 @@ if __name__ == "__main__":
     target_var = 'PMCH_acc_concentration'
 
     current_date = process_t6_data(directory, target_var)
-
-    pred_data = np.load('scaled_combined_t6_data_accumulated.npz')['pred_vars']
-    targ_data = np.load('scaled_combined_t6_data_accumulated.npz')['target_vars']
