@@ -9,7 +9,6 @@ class UNET(nn.Module):
     def __init__(self):
         super(UNET, self).__init__()
         
-        # Input channels: 8, 4 met vars at T, 4 at T+6
         self.input_channels = 8
         self.output_channels = 1
 
@@ -29,7 +28,7 @@ class UNET(nn.Module):
         self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2) # 
         self.dec3 = self._double_conv(256, 128)  # 128*2 because of skip connection
         
-        self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2) # 264 x 232
+        self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2) 
         self.dec2 = self._double_conv(128, 64)  # 64*2 because of skip connection
         
         # Final layer
@@ -40,7 +39,7 @@ class UNET(nn.Module):
     def _double_conv(self, in_channels, out_channels):
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding='same'),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels), # should use this
             nn.ReLU(),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding='same'),
             nn.BatchNorm2d(out_channels),
@@ -78,18 +77,7 @@ class UNET(nn.Module):
         # Final output
         output = self.final(dec2)
         
-        return output
-    
-# Custom loss function
-def physical_loss(pred, target):
-    mse = F.mse_loss(pred, target)
-
-    # Add mass conservation to loss term
-    pred_mass = pred.sum()
-    target_mass = target.sum()
-    mass_err = F.mse_loss(pred_mass, target_mass)
-
-    return mse #+ 0.3 * mass_err
+        return output 
 
 def train(data_path, model_path):
 
