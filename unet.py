@@ -39,7 +39,7 @@ class UNET(nn.Module):
     def _double_conv(self, in_channels, out_channels):
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding='same'),
-            nn.BatchNorm2d(out_channels), # should use this
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding='same'),
             nn.BatchNorm2d(out_channels),
@@ -51,31 +51,31 @@ class UNET(nn.Module):
 
         # Encoder
         enc1 = self.enc1(x)
-        enc1_pool = self.pool(enc1)
+        enc1_pool = self.pool(enc1) # 168x168
         
         enc2 = self.enc2(enc1_pool)
-        enc2_pool = self.pool(enc2)
+        enc2_pool = self.pool(enc2) # 84x84
         
         enc3 = self.enc3(enc2_pool)
-        enc3_pool = self.pool(enc3)
+        enc3_pool = self.pool(enc3) # 42x42
 
-        enc4 = self.enc4(enc3_pool) # Don't apply pool to final encoding step
+        enc4 = self.enc4(enc3_pool) 
     
         # Decoder with skip connections
-        up4 = self.up4(enc4) 
+        up4 = self.up4(enc4) # 84x84
         up4 = torch.cat((up4, enc3), dim=1)  # Skip connection
         dec4 = self.dec4(up4) 
 
-        up3 = self.up3(dec4)
+        up3 = self.up3(dec4) # 168x168
         up3 = torch.cat((up3, enc2), dim=1)  # Skip connection
         dec3 = self.dec3(up3)
         
-        up2 = self.up2(dec3)
+        up2 = self.up2(dec3) # 336x336
         up2 = torch.cat((up2, enc1), dim=1)  # Skip connection
         dec2 = self.dec2(up2)
         
         # Final output
-        output = self.final(dec2)
+        output = self.final(dec2) # 336x336
         
         return output 
 
