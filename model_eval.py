@@ -6,147 +6,11 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.colors as mcolors
 import xarray as xr
-
-class UNET(nn.Module):
-    def __init__(self):
-        super(UNET, self).__init__()
-        
-        # Input channels: 8, 4 met vars at T, 4 at T+6
-        self.input_channels = 8
-        self.output_channels = 1
-
-        # Pooling function
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        
-        # Encoder (Contracting Path)
-        self.enc1 = self._double_conv(self.input_channels, 64) 
-        self.enc2 = self._double_conv(64, 128) 
-        self.enc3 = self._double_conv(128, 256) 
-        self.enc4 = self._double_conv(256, 512)  
-        
-        # Decoder (Expansive Path)
-        self.up4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2) # 
-        self.dec4 = self._double_conv(512, 256) 
-
-        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2) # 
-        self.dec3 = self._double_conv(256, 128)  # 128*2 because of skip connection
-        
-        self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2) # 264 x 232
-        self.dec2 = self._double_conv(128, 64)  # 64*2 because of skip connection
-        
-        # Final layer
-        self.final = nn.Sequential(
-            nn.Conv2d(64, self.output_channels, kernel_size=1),
-        )
-        
-    def _double_conv(self, in_channels, out_channels):
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding='same'),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding='same'),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU()
-        )
-        
-    def forward(self, x):
-        # Calls the various steps defined in init
-
-        # Encoder
-        enc1 = self.enc1(x)
-        enc1_pool = self.pool(enc1)
-        
-        enc2 = self.enc2(enc1_pool)
-        enc2_pool = self.pool(enc2)
-        
-        enc3 = self.enc3(enc2_pool)
-        enc3_pool = self.pool(enc3)
-
-        enc4 = self.enc4(enc3_pool) # Don't apply pool to final encoding step
-    
-        # Decoder with skip connections
-        up4 = self.up4(enc4) 
-        up4 = torch.cat((up4, enc3), dim=1)  # Skip connection
-        dec4 = self.dec4(up4) 
-
-        up3 = self.up3(dec4)
-        up3 = torch.cat((up3, enc2), dim=1)  # Skip connection
-        dec3 = self.dec3(up3)
-        
-        up2 = self.up2(dec3)
-        up2 = torch.cat((up2, enc1), dim=1)  # Skip connection
-        dec2 = self.dec2(up2)
-        
-        # Final output
-        output = self.final(dec2)
-        
-        return output
-    
-def int_over_un(pred_fields, truth_fields):
-
-    threshold = 18
-
-    num_samples = pred_fields.shape[0]
-
-    ious = []
-
-    for sample in range(num_samples):
-        # Set values above the threshold to 0 and the rest to 1
-        pred_binary = np.where(pred_fields[sample] > threshold, 0, 1)
-        truth_binary = np.where(truth_fields[sample] > threshold, 0, 1)
-        
-        # Calculate overlap: Intersection of both binary arrays
-        intersection = np.logical_and(pred_binary == 1, truth_binary == 1)
-        union = np.logical_or(pred_binary == 1, truth_binary == 1)
-        
-        # Divide by areafraction representation
-        iou = intersection/union
-
-        ious.append(iou)
-
-    return ious
-
-
-if __name__ == "__main__":
-    model_weights_path = 'models/unet_accumulated_t6_minus40.pth'
-
-    # Load state_dict 
-    model = UNET()  # Recreate model architecture
-    model.load_state_dict(torch.load(model_weights_path, map_location=torch.device('cpu')))
-    model.eval()  # set evaluation mode
-
-    # Load data
-    pred_data = np.load('scaled_combined_t6_data_accumulated.npz')['pred_vars'][-40:, 1:, :, :] # Last 40 set aside for testing, remove initial conc var
-    targ_data = np.load('scaled_combined_t6_data_accumulated.npz')['target_vars'][-40:] # Last 40 set aside for testing
-
-    num_samples = pred_data.shape[0]
-    # Preallocate NumPy arrays for predictions and truths
-    pred_conc_array = np.empty((num_samples, *targ_data.shape[1:]))  # Define output_shape based on your model's output
-    true_conc_array = np.empty((num_samples, *targ_data.shape[1:]))  # Assume targ_data has shape (num_samples, height, width)
-
-    for sample in range(num_samples):
-        
-        # Get truth
-        truth_conc = targ_data[sample]
-        
-        # Generate prediction from model
-        input_stack = pred_data[sample]
-        
-        # Convert to tensor (add batch dimension)
-        input_tensor = torch.from_numpy(input_stack[np.newaxis, ...]).float()
-        
-        # Make prediction
-        with torch.no_grad():
-            output_tensor = model(input_tensor)
-        
-        # Get prediction and store in pre-allocated array
-        pred_conc = output_tensor.numpy().squeeze()
-        
-        pred_conc_array[sample] = pred_conc
-        true_conc_array[sample] = truth_conc
-
-    spatial_acc = fomis(pred_conc_array, true_conc_array)
-    print(spatial_acc)
+import random
+import unet
+import tqdm
+import torch.nn.functional as F
+from scipy.stats import pearsonr
 
 def get_projection(ds):
     attr = None
@@ -232,19 +96,12 @@ def plot_var_unet(
     truths,
     title: str | None = None,
     extents: list[float] | None = None,
-    unit: str | None = None,
     map_projection: ccrs.Projection = None,
-    figname: str | None = None,
-    show_figure: bool = False,
     minval: float = None,
     maxval: float = None,
-    num_levels: int = 10,
-    scale: int = 'linear',
-    var: str = 'PMCH_acc_concentration',
-    ax = None
 ):  
     # Use SNAP file as template for plotting
-    snap_file_path = f'output_files/ringhals_20230101_00Z.nc'
+    snap_file_path = f'data/ringhals_20230101_00Z.nc'
     snap_data = xr.open_dataset(snap_file_path, engine="netcdf4")
     snap_data = snap_data.isel(x=slice(188, 524), y=slice(97, 433)) # Dimensions: 336x336
     model = snap_data
@@ -270,10 +127,7 @@ def plot_var_unet(
     # Use a built-in colormap for a smooth gradient
     cmap = plt.get_cmap('viridis')
     
-    if scale == 'log':
-        norm = mcolors.LogNorm(vmin=minval, vmax=maxval)
-    else:
-        norm = mcolors.Normalize(vmin=minval, vmax=maxval)
+    norm = mcolors.Normalize(vmin=minval, vmax=maxval)
 
     for i, index in enumerate(indices):
         # Get prediction and truth for this sample
@@ -295,8 +149,9 @@ def plot_var_unet(
         x, y = pmeshify(unet_pred_wrapped["x"], unet_pred_wrapped["y"])
         
         # Plot the data
-        mesh = ax.pcolormesh(x, y, mvar[0], cmap=cmap, norm=norm, transform=map_projection)
-        ax.set_title(f'Sample {index} - Prediction')
+        mesh = ax.pcolormesh(x, y, mvar, cmap=cmap, norm=norm, transform=map_projection)
+        iou_score = int_over_un(threshold=-19.5, pred=unet_pred, truth=snap_truth)
+        ax.set_title(f'Test Sample {index} - Prediction. IoU: {iou_score:.2f}')
         
         # Truth plot
         ax = axes[i*2 + 1]
@@ -312,8 +167,8 @@ def plot_var_unet(
         mvar = np.ma.masked_where(snap_truth_wrapped.values <= minval, snap_truth_wrapped.values)
         
         # Plot the data
-        mesh = ax.pcolormesh(x, y, mvar[0], cmap=cmap, norm=norm, transform=map_projection)
-        ax.set_title(f'Sample {index} - Truth')
+        mesh = ax.pcolormesh(x, y, mvar, cmap=cmap, norm=norm, transform=map_projection)
+        ax.set_title(f'Test Sample {index} - Truth')
         
         # Add features to both subplots
         for j in range(2):
@@ -341,24 +196,243 @@ def plot_var_unet(
             if extents is not None:
                 ax.set_extent(extents, crs=map_projection)
 
-    # Add colorbar
-    fig.subplots_adjust(right=0.85)
-    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])
-    fig.colorbar(mesh, cax=cbar_ax)
-    cbar_ax.set_title(var, fontsize=8)
+    fig.colorbar(mesh,  ax=axes[:], orientation='horizontal', fraction=0.05, pad=0.05, label=r'Accumulated Concentration ($\ln(\mathrm{g}/\mathrm{m}^2)$)')
 
     # Add overall title if provided
     if title is not None:
         fig.suptitle(title, y=0.95)
 
-    # Save or show figure
-    if figname is not None:
-        plt.savefig(figname, dpi=600, bbox_inches='tight')
+    plt.savefig('figures/prediction_examples.png')
     
-    if show_figure:
-        plt.show()
+    plt.show()
 
     plt.close()
+
+def int_over_un(threshold, pred, truth):
+
+    pred_binary = np.where(pred > threshold, 1, 0)
+    truth_binary = np.where(truth > threshold, 1, 0)
+    
+    intersection = np.logical_and(pred_binary == 1, truth_binary == 1)
+    union = np.logical_or(pred_binary == 1, truth_binary == 1)
+    
+    iou = np.sum(intersection)/np.sum(union)
+
+    return iou
+
+
+def permutation_importance(model, X, y_true, metric='mse'):
+    """
+    Computes permutation importance for each input variable.
+    
+    Args:
+        model: Trained PyTorch model (e.g., U-Net)
+        X: Input tensor of shape (N, 8, H, W)
+        y_true: Ground truth tensor of shape (N, 1, H, W)
+        metric: 'mse' or 'iou'
+
+    Returns:
+        importances: List of importance values (higher = more important)
+    """
+    # Ensure tensors
+    if isinstance(X, np.ndarray):
+        X = torch.tensor(X, dtype=torch.float32)
+    if isinstance(y_true, np.ndarray):
+        y_true = torch.tensor(y_true, dtype=torch.float32)
+
+    model.eval()
+    device = next(model.parameters()).device
+    X = X.to(device)
+    y_true = y_true.to(device)
+
+    N, C, H, W = X.shape
+    base_errors = []
+
+    # Baseline error with unshuffled input
+    for i in range(N):
+        xi = X[i].unsqueeze(0)  # (1, 8, H, W)
+        yi = y_true[i].unsqueeze(0)  # (1, 1, H, W)
+        with torch.no_grad():
+            y_pred = model(xi)
+            if metric == 'mse':
+                error = F.mse_loss(y_pred, yi).item() 
+            elif metric == 'iou':
+                int_over_un(threshold=0.5, pred=y_pred, truth=yi).item()
+            else:
+                ValueError
+        base_errors.append(error)
+
+    base_error_mean = np.mean(base_errors)
+    importances = []
+
+    for var_idx in range(C):
+        errors = []
+        for i in tqdm(range(N), desc=f"Permuting variable {var_idx}"):
+            xi = X[i].clone()  # shape: (8, H, W)
+            yi = y_true[i].unsqueeze(0)
+
+            # Shuffle the selected variable across the dataset
+            shuffled_vals = X[:, var_idx].reshape(N, -1)
+            perm = torch.randperm(N)
+            shuffled = shuffled_vals[perm].reshape(N, H, W)
+            xi[var_idx] = shuffled[i]  # Replace the variable with permuted values
+
+            xi = xi.unsqueeze(0)  # (1, 8, H, W)
+
+            with torch.no_grad():
+                y_pred = model(xi)
+                if metric == 'mse':
+                    error = F.mse_loss(y_pred, yi).item() 
+                elif metric == 'iou':
+                    int_over_un(threshold=0.5, pred=y_pred, truth=yi).item()
+                else:
+                    ValueError
+            errors.append(error)
+
+        delta_error = -(np.mean(errors) - base_error_mean)
+        importances.append(delta_error)
+
+    return importances
+
+def plot_importances(importances, metric='mse'):
+    # Names for the 8 input variables
+    variable_names = [
+        'x-wind (T)',
+        'x-wind (T+6h)',
+        'y-wind (T)',
+        'y-wind (T+6h)',
+        'ABL height (T)',
+        'ABL height (T+6h)',
+        'Surf. Pressure (T)',
+        'Surf. Pressure (T+6h)'
+    ]
+
+    # Plot
+    plt.figure(figsize=(8, 6))
+    plt.barh(variable_names, importances, color='steelblue')
+
+    if metric=='mse':
+        plt.xlabel("Increase in MSE (Permutation Importance)", fontsize=12)
+    elif metric=='iou':
+        plt.xlabel("Drop in IoU (Permutation Importance)", fontsize=12)
+
+    plt.title("Importance of Meteorological Variables for U-Net Emulator", fontsize=14)
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+    plt.gca().invert_yaxis()  
+    plt.tight_layout()
+    plt.savefig(f'figures/{metric}_variable_importance.png')
+    plt.show()
+
+def unet_predict(model, X_data, y_data):
+
+    num_samples = X_data.shape[0]
+    # Preallocate NumPy arrays for predictions and truths
+    pred_conc_array = np.empty((num_samples, *y_data.shape[1:]))  # Define output_shape based on model output
+    true_conc_array = np.empty((num_samples, *y_data.shape[1:]))  
+
+    for sample in range(num_samples):
+        
+        # Get truth
+        truth_conc = y_data[sample]
+        
+        # Generate prediction from model
+        input_stack = X_data[sample]
+        
+        # Convert to tensor (add batch dimension)
+        input_tensor = torch.from_numpy(input_stack[np.newaxis, ...]).float()
+        
+        # Make prediction
+        with torch.no_grad():
+            output_tensor = model(input_tensor)
+        
+        # Get prediction and store in pre-allocated array
+        pred_conc = output_tensor.numpy().squeeze()
+        
+        pred_conc_array[sample] = pred_conc
+        true_conc_array[sample] = truth_conc
+
+    return pred_conc_array, true_conc_array
+
+
+def plot_correlation(pred_fields, truth_fields):
+    # Adjust values by subtracting 20
+    pred_fields -= 20
+    truth_fields -= 20
+
+    # Set a minimum value to filter out
+    minval = -20
+
+    # Create a mask to filter out very small/zero values
+    mask = (pred_fields > minval) & (truth_fields > minval)
+    pred_filtered = pred_fields[mask] 
+    truth_filtered = truth_fields[mask]
+
+    # Calculate Pearson correlation
+    corr_coef, _ = pearsonr(pred_filtered.flatten(), truth_filtered.flatten())
+
+    max_val = max(np.max(pred_filtered), np.max(truth_filtered))
+
+    # Create the heatmap
+    plt.figure(figsize=(8, 8))
+    heatmap, xedges, yedges = np.histogram2d(
+        pred_filtered.flatten(), 
+        truth_filtered.flatten(), 
+        bins=40,
+        range=[[minval, max_val], [minval, max_val]]  # Explicit range
+    )
+
+    # Plot heatmap (with optional log scaling)
+    plt.imshow(
+        heatmap.T, 
+        origin='lower', 
+        cmap='viridis', 
+        extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+        aspect='auto'
+    )
+
+    # Plot y = x line
+    plt.plot([minval, max_val], [minval, max_val], 'r--', label='y=x')
+
+    # Labels & title
+    plt.xlabel('Predicted Values')
+    plt.ylabel('True Values')
+    plt.title(f'Heatmap of Predicted vs True Values\nCorrelation: {corr_coef:.2f}')
+    plt.colorbar(label='Number of points')
+    plt.legend()
+    plt.grid()
+
+    # Ensure axis limits include all data
+    plt.xlim(minval, max_val)
+    plt.ylim(minval, max_val)
+
+    plt.savefig('figures/correlation_plot.png')
+    plt.show()
+
+if __name__ == "__main__":
+    # Load state_dict 
+    model_weights_path = 'models/unet_emulator_sample.pth'
+    model = unet.UNET()  # Recreate model architecture
+    model.load_state_dict(torch.load(model_weights_path, map_location=torch.device('cuda')))
+
+    # load data
+    X_data = np.load('test_set.npz')['X_test']
+    y_test = np.load('test_set.npz')['y_test']
+
+    importances_iou  = permutation_importance(model, X_data, y_test, metric='iou')
+    importances_mse  = permutation_importance(model, X_data, y_test, metric='mse')
+
+    # Produce plots for permutation importance
+    plot_importances(importances_iou, metric='iou')
+    plot_importances(importances_mse, metric='mse')
+
+    pred_conc_array, true_conc_array = unet_predict(model, X_data, y_test)
+
+    # Produce plot for examples of emulator predictions
+    plot_var_unet(pred_conc_array.copy(), true_conc_array.copy(), maxval=0, minval=-19)
+
+    spatial_acc = int_over_un(pred_conc_array, true_conc_array)
+    plot_correlation(pred_conc_array, true_conc_array)
+
 
 
 
