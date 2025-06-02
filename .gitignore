@@ -1,5 +1,9 @@
 data/scaled_dataset_full.npz
 data/test_set_report.npz
+data/full_data.npz
+models/unet_emulator_report_version.pth
 find_middle.ipynb
 data_processing.py
 data_scaling.ipynb
+test.ipynb
+sample_dataset.ipynb

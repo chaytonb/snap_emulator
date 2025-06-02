@@ -382,7 +382,7 @@ def plot_correlation(pred_fields, truth_fields):
         cmap='viridis', 
         extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
         aspect='auto',
-        vmax=350
+        vmax=800
     )
 
     # Plot y = x line
