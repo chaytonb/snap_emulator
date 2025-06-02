@@ -8,9 +8,10 @@ import matplotlib.colors as mcolors
 import xarray as xr
 import random
 import unet
-import tqdm
+from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.stats import pearsonr
+from config import DATA_MODE, DATA_PATHS
 
 def get_projection(ds):
     attr = None
@@ -150,7 +151,7 @@ def plot_var_unet(
         
         # Plot the data
         mesh = ax.pcolormesh(x, y, mvar, cmap=cmap, norm=norm, transform=map_projection)
-        iou_score = int_over_un(threshold=-19.5, pred=unet_pred, truth=snap_truth)
+        iou_score = int_over_un(threshold=-19, pred=unet_pred, truth=snap_truth)
         ax.set_title(f'Test Sample {index} - Prediction. IoU: {iou_score:.2f}')
         
         # Truth plot
@@ -198,7 +199,6 @@ def plot_var_unet(
 
     fig.colorbar(mesh,  ax=axes[:], orientation='horizontal', fraction=0.05, pad=0.05, label=r'Accumulated Concentration ($\ln(\mathrm{g}/\mathrm{m}^2)$)')
 
-    # Add overall title if provided
     if title is not None:
         fig.suptitle(title, y=0.95)
 
@@ -215,6 +215,9 @@ def int_over_un(threshold, pred, truth):
     
     intersection = np.logical_and(pred_binary == 1, truth_binary == 1)
     union = np.logical_or(pred_binary == 1, truth_binary == 1)
+
+    if np.sum(union) == 0:
+        return 1.0 if np.sum(intersection) == 0 else 0.0  # Handle edge case: both are all zeros
     
     iou = np.sum(intersection)/np.sum(union)
 
@@ -222,18 +225,7 @@ def int_over_un(threshold, pred, truth):
 
 
 def permutation_importance(model, X, y_true, metric='mse'):
-    """
-    Computes permutation importance for each input variable.
-    
-    Args:
-        model: Trained PyTorch model (e.g., U-Net)
-        X: Input tensor of shape (N, 8, H, W)
-        y_true: Ground truth tensor of shape (N, 1, H, W)
-        metric: 'mse' or 'iou'
 
-    Returns:
-        importances: List of importance values (higher = more important)
-    """
     # Ensure tensors
     if isinstance(X, np.ndarray):
         X = torch.tensor(X, dtype=torch.float32)
@@ -257,7 +249,7 @@ def permutation_importance(model, X, y_true, metric='mse'):
             if metric == 'mse':
                 error = F.mse_loss(y_pred, yi).item() 
             elif metric == 'iou':
-                int_over_un(threshold=0.5, pred=y_pred, truth=yi).item()
+                error = int_over_un(threshold=0.5, pred=y_pred, truth=yi).item()
             else:
                 ValueError
         base_errors.append(error)
@@ -284,7 +276,7 @@ def permutation_importance(model, X, y_true, metric='mse'):
                 if metric == 'mse':
                     error = F.mse_loss(y_pred, yi).item() 
                 elif metric == 'iou':
-                    int_over_un(threshold=0.5, pred=y_pred, truth=yi).item()
+                    error = int_over_un(threshold=0.5, pred=y_pred, truth=yi).item()
                 else:
                     ValueError
             errors.append(error)
@@ -325,6 +317,8 @@ def plot_importances(importances, metric='mse'):
 
 def unet_predict(model, X_data, y_data):
 
+    model.eval()
+
     num_samples = X_data.shape[0]
     # Preallocate NumPy arrays for predictions and truths
     pred_conc_array = np.empty((num_samples, *y_data.shape[1:]))  # Define output_shape based on model output
@@ -363,7 +357,7 @@ def plot_correlation(pred_fields, truth_fields):
     minval = -20
 
     # Create a mask to filter out very small/zero values
-    mask = (pred_fields > minval) & (truth_fields > minval)
+    mask = (pred_fields >= minval) & (truth_fields >= minval)
     pred_filtered = pred_fields[mask] 
     truth_filtered = truth_fields[mask]
 
@@ -387,7 +381,8 @@ def plot_correlation(pred_fields, truth_fields):
         origin='lower', 
         cmap='viridis', 
         extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
-        aspect='auto'
+        aspect='auto',
+        vmax=350
     )
 
     # Plot y = x line
@@ -408,17 +403,23 @@ def plot_correlation(pred_fields, truth_fields):
     plt.savefig('figures/correlation_plot.png')
     plt.show()
 
+    return corr_coef
+
 if __name__ == "__main__":
     # Load state_dict 
-    model_weights_path = 'models/unet_emulator_sample.pth'
+    model_weights_path = f'models/unet_emulator_{DATA_MODE}.pth'
     model = unet.UNET()  # Recreate model architecture
-    model.load_state_dict(torch.load(model_weights_path, map_location=torch.device('cuda')))
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.load_state_dict(torch.load(model_weights_path, map_location=device))
 
     # load data
-    X_data = np.load('test_set.npz')['X_test']
-    y_test = np.load('test_set.npz')['y_test']
+    print('Loading Data')
+    X_data = np.load(f'data/test_set_{DATA_MODE}.npz')['pred_vars']
+    y_test = np.load(f'data/test_set_{DATA_MODE}.npz')['target_vars']
 
+    print('Calculating IoU Permutation Importances')
     importances_iou  = permutation_importance(model, X_data, y_test, metric='iou')
+    print('Calculating MSE Permutation Importances')
     importances_mse  = permutation_importance(model, X_data, y_test, metric='mse')
 
     # Produce plots for permutation importance
@@ -430,8 +431,20 @@ if __name__ == "__main__":
     # Produce plot for examples of emulator predictions
     plot_var_unet(pred_conc_array.copy(), true_conc_array.copy(), maxval=0, minval=-19)
 
-    spatial_acc = int_over_un(pred_conc_array, true_conc_array)
-    plot_correlation(pred_conc_array, true_conc_array)
+    print('Calculating IoU Values for Testing Dataset')
+    iou_vals = []
+    for sample in range(pred_conc_array.shape[0]):
+        prediction = pred_conc_array[sample, 0]
+        truth = true_conc_array[sample, 0]
+        iou = int_over_un(1, prediction, truth)
+        iou_vals.append(iou.item())
+
+    avg_iou = np.mean(iou_vals)
+    print('Average IoU Score from test set: ' + str(avg_iou))
+
+    corr = plot_correlation(pred_conc_array, true_conc_array)
+
+    print('Pearson Correlation from test set: ' + str(corr))
 
 
 
