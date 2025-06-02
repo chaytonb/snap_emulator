@@ -79,12 +79,13 @@ which produces the figures used in the report, and prints the mean IoU value of 
 placed in the figures folder and overwrite any existing contents.
 
 The full dataset after all pre-processing is uploaded on a google drive, which can be accessed from the 
-following link: https://drive.google.com/drive/folders/1SP02Nr2nP2UOgj--GKbbnunfV08AKpJS?usp=drive_link
+following link: https://drive.google.com/drive/folders/1SP02Nr2nP2UOgj--GKbbnunfV08AKpJS?usp=drive_link 
+
 The Google drive contains two zip files. full_data.zip contains the full dataset. The other zip file, report_weights_and_test_set.zip
-contains the weights and corresponding test set which were used when writing the report. Therefore these can be used in conjunction with the report_figures.ipynb notebook
-to recreate the exact figures in the report.
+contains the weights and corresponding test set which were used when writing the report. Therefore these can be placed in the models and data folders respectively, 
+then used in conjunction with the report_figures.ipynb notebook to recreate the exact figures in the report.
 
 In order to run this code with the full dataset, download the zip file, extract the full_data.npz file and place it in the data folder.
 Then change the DATA_MODE variable in the config.py file to 'full' and save. Then the unet_train.ipynb and model_eval.py
-files can be used as before. For the full 100 epochs used in the project, this can take some time. On an RTX3070 GPU, this took a little over an 
+files can be used as before. For the full 100 epochs used in the project, this can take some time. On an Nvidia RTX3070 GPU, this took a little over an 
 hour to train.

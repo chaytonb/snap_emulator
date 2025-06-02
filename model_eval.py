@@ -281,7 +281,10 @@ def permutation_importance(model, X, y_true, metric='mse'):
                     ValueError
             errors.append(error)
 
-        delta_error = -(np.mean(errors) - base_error_mean)
+        if metric == 'mse':
+            delta_error = (np.mean(errors) - base_error_mean)
+        elif metric == 'iou':
+            delta_error = -(np.mean(errors) - base_error_mean)
         importances.append(delta_error)
 
     return importances
