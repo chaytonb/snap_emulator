@@ -35,7 +35,7 @@ Also contained within the data folder is an output file from the SNAP model, 'ri
 only used in the code for retrieving the geospatial information required for plotting the data in the correct
 projection.
 
-Also important to note is that the concentration values produced by the emulator are adjusted by +20. In the plotting 
+Also important to note is that the log concentration values produced by the emulator are adjusted by +20. In the plotting 
 functions, this 20 is subtracted again so that the concentration is then in ln(c) where c is the concentration
 in g/m^2.
 

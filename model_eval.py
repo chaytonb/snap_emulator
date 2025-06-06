@@ -197,7 +197,7 @@ def plot_var_unet(
             if extents is not None:
                 ax.set_extent(extents, crs=map_projection)
 
-    fig.colorbar(mesh,  ax=axes[:], orientation='horizontal', fraction=0.05, pad=0.05, label=r'Accumulated Concentration ($\ln(\mathrm{g}/\mathrm{m}^2)$)')
+    fig.colorbar(mesh,  ax=axes[:], orientation='horizontal', fraction=0.05, pad=0.05, label=r'Accumulated Concentration ($\ln(\mathrm{g}/\mathrm{m}^3)$)')
 
     if title is not None:
         fig.suptitle(title, y=0.95)
@@ -392,8 +392,8 @@ def plot_correlation(pred_fields, truth_fields):
     plt.plot([minval, max_val], [minval, max_val], 'r--', label='y=x')
 
     # Labels & title
-    plt.xlabel('Predicted Values')
-    plt.ylabel('True Values')
+    plt.xlabel(r'U-Net Predicted Concentration ($\ln(\mathrm{g}/\mathrm{m}^3)$)')
+    plt.ylabel(r'SNAP Model True Concentration ($\ln(\mathrm{g}/\mathrm{m}^3)$)')
     plt.title(f'Heatmap of Predicted vs True Values\nCorrelation: {corr_coef:.2f}')
     plt.colorbar(label='Number of points')
     plt.legend()
